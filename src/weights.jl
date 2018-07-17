@@ -2,19 +2,21 @@
 abstract type AbstractWeights{S<:Real, T<:Real, V<:AbstractVector{T}} <: AbstractVector{T} end
 
 """
-    @weights name
+    @weights name [constructor=true]
 
-Generates a new generic weight type with specified `name`, which subtypes `AbstractWeights`
-and stores the `values` (`V<:RealVector`) and `sum` (`S<:Real`).
+Generate a new generic weight type with specified `name`, which subtypes `AbstractWeights`
+and stores the `values` (`V<:RealVector`) and `sum` (`S<:Real`). If `constructor` is `true`,
+a one-argument constructor that computes the sum is defined.
 """
-macro weights(name)
-    return quote
+macro weights(name, constructor=true)
+    def = quote
         mutable struct $name{S<:Real, T<:Real, V<:AbstractVector{T}} <: AbstractWeights{S, T, V}
             values::V
             sum::S
         end
-        $(esc(name))(vs) = $(esc(name))(vs, sum(vs))
     end
+    constructor && push!(def.args, :($(esc(name))(vs) = $(esc(name))(vs, sum(vs))))
+    def
 end
 
 eltype(wv::AbstractWeights) = eltype(wv.values)
