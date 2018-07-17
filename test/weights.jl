@@ -2,6 +2,8 @@ using StatsBase
 using LinearAlgebra, Random, SparseArrays, Test
 
 @testset "StatsBase.Weights" begin
+# NOTE: Do not add eweights here, as its sum can only be 1 so many of the tests
+# below don't make sense for it
 weight_funcs = (weights, aweights, fweights, pweights)
 
 # Construction
@@ -495,6 +497,34 @@ end
     @test wquantile(data[1], f(w), 0.5)   ≈  answer atol = 1e-5
     @test wquantile(data[1], w, [0.5])    ≈ [answer] atol = 1e-5
     @test wquantile(data[1], w, 0.5)      ≈  answer atol = 1e-5
+end
+
+@testset "ExponentialWeights" begin
+    @testset "Basic Usage" begin
+        θ = 5.25
+        λ = 1 - exp(-1 / θ)     # simple conversion for the more common/readable method
+
+        w = ExponentialWeights(4, λ)
+
+        @test round.(w, digits=4) == [0.1837, 0.2222, 0.2688, 0.3253]
+        @test eweights(4, λ) ≈ w
+    end
+
+    @testset "Failure Conditions" begin
+        @test_throws ArgumentError eweights(0, 0.3)
+        @test_throws ArgumentError eweights(1, 1.1)
+        @test_throws ArgumentError ExponentialWeights(rand(4))
+    end
+
+    @testset "ExponentialWeights(n=$n, λ=$λ)" for (n, λ) in [(1, 1.0), (1000, 0.000001)]
+        eweights(n, λ)
+    end
+
+    @testset "Bias Correction" begin
+        w = eweights(4, 0.3)
+        X = rand(4, 3)
+        @test cov(X, w; corrected=false) != cov(X, w; corrected=true)
+    end
 end
 
 end # @testset StatsBase.Weights

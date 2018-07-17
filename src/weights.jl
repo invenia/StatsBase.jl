@@ -195,9 +195,79 @@ pweights(vs::RealArray) = ProbabilityWeights(vec(vs))
     end
 end
 
+# NOTE: A custom constructor is needed because exponential weights must
+# sum to 1, so we want to enforce that on construction of the type
+@weights ExponentialWeights false
+
+"""
+    ExponentialWeights
+
+# Fields
+
+* `λ::Float64`: is a smoothing factor or rate paremeter between 0 .. 1.
+    As this value approaches 0 the resulting weights will be almost equal(),
+    while values closer to 1 will put higher weight on the end elements of the vector.
+
+When called with a desired length `n` (`Int`) a vector of length `n` will
+be returned, where each element is set to `λ * (1 - λ)^(1 - i)`.
+
+# Usage
+
+```julia
+w = ExponentialWeights(10, 0.3)
+10-element ExponentialWeights{Float64,Float64,Array{Float64,1}}:
+ 0.012458
+ 0.0177971
+ 0.0254245
+ 0.0363207
+ 0.0518867
+ 0.0741238
+ 0.105891
+ 0.151273
+ 0.216104
+ 0.308721
+```
+"""
+function ExponentialWeights(vs::V) where {T<:Real, V<:AbstractVector{T}}
+    s = sum(vs)
+    s ≈ one(T) || throw(ArgumentError("weight values do not sum to 1 (got $s)"))
+    ExponentialWeights{T, T, V}(vs, s)
+end
+
+function ExponentialWeights(n::Integer, λ::Real)
+    n > 0 || throw(ArgumentError("cannot construct weights of length < 1"))
+    0 < λ <= 1 || throw(ArgumentError("smoothing factor must be between 0 and 1"))
+    w0 = map(i -> λ * (1 - λ)^(1 - i), 1:n)
+    s = sum(w0)
+    ExponentialWeights(w0 / s)
+end
+
+"""
+    eweights(n, λ)
+
+Construct an `ExponentialWeights` vector with length `n`,
+where each element in position ``i`` is set to ``λ * (1 - λ)^(1 - i)``.
+The entire set of weights are then normalized so that they sum to 1.0
+
+``λ`` is a smoothing factor or rate parameter between 0 and 1.
+As this value approaches 0 the resulting weights will be almost equal,
+while values closer to 1 will put higher weight on the end elements of the vector.
+"""
+eweights(n::Integer, λ::Real) = ExponentialWeights(n, λ)
+
+"""
+    varcorrection(w::ExponentialWeights, corrected=false)
+
+* `corrected=true`: ``\\frac{1}{1 - \\sum {w^2}}``
+* `corrected=false`: ``1.0``
+"""
+@inline function varcorrection(w::ExponentialWeights, corrected::Bool=false)
+    corrected ? 1 / (1 - sum(x -> x^2, w)) : 1.0
+end
+
 ##### Equality tests #####
 
-for w in (AnalyticWeights, FrequencyWeights, ProbabilityWeights, Weights)
+for w in (AnalyticWeights, FrequencyWeights, ProbabilityWeights, ExponentialWeights, Weights)
     @eval begin
         Base.isequal(x::$w, y::$w) = isequal(x.sum, y.sum) && isequal(x.values, y.values)
         Base.:(==)(x::$w, y::$w)   = (x.sum == y.sum) && (x.values == y.values)
