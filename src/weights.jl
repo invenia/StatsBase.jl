@@ -2,19 +2,21 @@
 abstract type AbstractWeights{S<:Real, T<:Real, V<:AbstractVector{T}} <: AbstractVector{T} end
 
 """
-    @weights name
+    @weights name [constructor=true]
 
-Generates a new generic weight type with specified `name`, which subtypes `AbstractWeights`
-and stores the `values` (`V<:RealVector`) and `sum` (`S<:Real`).
+Generate a new generic weight type with specified `name`, which subtypes `AbstractWeights`
+and stores the `values` (`V<:RealVector`) and `sum` (`S<:Real`). If `constructor` is `true`,
+a one-argument constructor that computes the sum is defined.
 """
-macro weights(name)
-    return quote
+macro weights(name, constructor=true)
+    def = quote
         mutable struct $name{S<:Real, T<:Real, V<:AbstractVector{T}} <: AbstractWeights{S, T, V}
             values::V
             sum::S
         end
-        $(esc(name))(vs) = $(esc(name))(vs, sum(vs))
     end
+    constructor && push!(def.args, :($(esc(name))(vs) = $(esc(name))(vs, sum(vs))))
+    def
 end
 
 eltype(wv::AbstractWeights) = eltype(wv.values)
@@ -193,9 +195,87 @@ pweights(vs::RealArray) = ProbabilityWeights(vec(vs))
     end
 end
 
+# NOTE: A custom constructor is needed because exponential weights must
+# sum to 1, so we want to enforce that on construction of the type
+@weights ExponentialWeights false
+
+"""
+    ExponentialWeights(vs)
+
+Construct an `ExponentialWeights` vector with weight values `vs`, which must sum to 1.
+
+Exponential weights are a common form of temporal weights which assign exponentially
+greater weight to past observations, which in this case corresponds to the tail end of
+the vector.
+"""
+function ExponentialWeights(vs::V) where {T<:Real, V<:AbstractVector{T}}
+    s = sum(vs)
+    s ≈ one(T) || throw(ArgumentError("weight values do not sum to 1 (got $s)"))
+    ExponentialWeights{T, T, V}(vs, s)
+end
+
+"""
+    eweights(n, λ)
+
+Construct an [`ExponentialWeights`](@ref) vector with length `n`,
+where each element in position ``i`` is set to ``λ (1 - λ)^{1 - i}``.
+The entire set of weights are then normalized to sum to 1.
+
+``λ`` is a smoothing factor or rate parameter such that ``0 < λ \\leq 1``.
+As this value approaches 0, the resulting weights will be almost equal,
+while values closer to 1 will put greater weight on the tail elements of the vector.
+
+# Examples
+
+```julia-repl
+julia> eweights(10, 0.3)
+10-element ExponentialWeights{Float64,Float64,Array{Float64,1}}:
+ 0.012458
+ 0.0177971
+ 0.0254245
+ 0.0363207
+ 0.0518867
+ 0.0741238
+ 0.105891
+ 0.151273
+ 0.216104
+ 0.308721
+```
+"""
+function eweights(n::Integer, λ::Real)
+    n > 0 || throw(ArgumentError("cannot construct exponential weights of length < 1"))
+    0 < λ <= 1 || throw(ArgumentError("smoothing factor must be between 0 and 1"))
+    w0 = map(i -> λ * (1 - λ)^(1 - i), 1:n)
+    s = sum(w0)
+    w0 ./= s
+    ExponentialWeights{typeof(s), eltype(w0), typeof(w0)}(w0, s)
+end
+
+"""
+    eweights(vs)
+
+Construct an [`ExponentialWeights`](@ref) vector using the given array.
+"""
+eweights(v::RealVector) = ExponentialWeights(v)
+eweights(v::RealArray) = ExponentialWeights(vec(v))
+
+"""
+    varcorrection(w::ExponentialWeights, corrected=false)
+
+* `corrected=true`: ``\\frac{1}{1 - \\sum {w^2}}``
+* `corrected=false`: ``1``
+"""
+@inline function varcorrection(w::ExponentialWeights, corrected::Bool=false)
+    if corrected
+        1 / (1 - sum(abs2, w.values))
+    else
+        1 / one(w.sum) # just 1 promoted to the same type as the other branch
+    end
+end
+
 ##### Equality tests #####
 
-for w in (AnalyticWeights, FrequencyWeights, ProbabilityWeights, Weights)
+for w in (AnalyticWeights, FrequencyWeights, ProbabilityWeights, ExponentialWeights, Weights)
     @eval begin
         Base.isequal(x::$w, y::$w) = isequal(x.sum, y.sum) && isequal(x.values, y.values)
         Base.:(==)(x::$w, y::$w)   = (x.sum == y.sum) && (x.values == y.values)
