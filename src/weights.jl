@@ -200,21 +200,35 @@ end
 @weights ExponentialWeights false
 
 """
-    ExponentialWeights
+    ExponentialWeights(vs)
 
-# Fields
+Construct an `ExponentialWeights` vector with weight values `vs`, which must sum to 1.
 
-* `λ::Float64`: is a smoothing factor or rate paremeter between 0 .. 1.
-    As this value approaches 0 the resulting weights will be almost equal(),
-    while values closer to 1 will put higher weight on the end elements of the vector.
+Exponential weights are a common form of temporal weights which assign exponentially
+greater weight to past observations, which in this case corresponds to the tail end of
+the vector.
+"""
+function ExponentialWeights(vs::V) where {T<:Real, V<:AbstractVector{T}}
+    s = sum(vs)
+    s ≈ one(T) || throw(ArgumentError("weight values do not sum to 1 (got $s)"))
+    ExponentialWeights{T, T, V}(vs, s)
+end
 
-When called with a desired length `n` (`Int`) a vector of length `n` will
-be returned, where each element is set to `λ * (1 - λ)^(1 - i)`.
+"""
+    eweights(n, λ)
 
-# Usage
+Construct an [`ExponentialWeights`](@ref) vector with length `n`,
+where each element in position ``i`` is set to ``λ (1 - λ)^{1 - i}``.
+The entire set of weights are then normalized to sum to 1.
 
-```julia
-w = ExponentialWeights(10, 0.3)
+``λ`` is a smoothing factor or rate parameter such that ``0 < λ \\leq 1``.
+As this value approaches 0, the resulting weights will be almost equal,
+while values closer to 1 will put greater weight on the tail elements of the vector.
+
+# Examples
+
+```julia-repl
+julia> eweights(10, 0.3)
 10-element ExponentialWeights{Float64,Float64,Array{Float64,1}}:
  0.012458
  0.0177971
@@ -228,41 +242,35 @@ w = ExponentialWeights(10, 0.3)
  0.308721
 ```
 """
-function ExponentialWeights(vs::V) where {T<:Real, V<:AbstractVector{T}}
-    s = sum(vs)
-    s ≈ one(T) || throw(ArgumentError("weight values do not sum to 1 (got $s)"))
-    ExponentialWeights{T, T, V}(vs, s)
-end
-
-function ExponentialWeights(n::Integer, λ::Real)
-    n > 0 || throw(ArgumentError("cannot construct weights of length < 1"))
+function eweights(n::Integer, λ::Real)
+    n > 0 || throw(ArgumentError("cannot construct exponential weights of length < 1"))
     0 < λ <= 1 || throw(ArgumentError("smoothing factor must be between 0 and 1"))
     w0 = map(i -> λ * (1 - λ)^(1 - i), 1:n)
     s = sum(w0)
-    ExponentialWeights(w0 / s)
+    w0 ./= s
+    ExponentialWeights{typeof(s), eltype(w0), typeof(w0)}(w0, s)
 end
 
 """
-    eweights(n, λ)
+    eweights(vs)
 
-Construct an `ExponentialWeights` vector with length `n`,
-where each element in position ``i`` is set to ``λ * (1 - λ)^(1 - i)``.
-The entire set of weights are then normalized so that they sum to 1.0
-
-``λ`` is a smoothing factor or rate parameter between 0 and 1.
-As this value approaches 0 the resulting weights will be almost equal,
-while values closer to 1 will put higher weight on the end elements of the vector.
+Construct an [`ExponentialWeights`](@ref) vector using the given array.
 """
-eweights(n::Integer, λ::Real) = ExponentialWeights(n, λ)
+eweights(v::RealVector) = ExponentialWeights(v)
+eweights(v::RealArray) = ExponentialWeights(vec(v))
 
 """
     varcorrection(w::ExponentialWeights, corrected=false)
 
 * `corrected=true`: ``\\frac{1}{1 - \\sum {w^2}}``
-* `corrected=false`: ``1.0``
+* `corrected=false`: ``1``
 """
 @inline function varcorrection(w::ExponentialWeights, corrected::Bool=false)
-    corrected ? 1 / (1 - sum(x -> x^2, w)) : 1.0
+    if corrected
+        1 / (1 - sum(abs2, w.values))
+    else
+        1 / one(w.sum) # just 1 promoted to the same type as the other branch
+    end
 end
 
 ##### Equality tests #####

@@ -504,7 +504,8 @@ end
         θ = 5.25
         λ = 1 - exp(-1 / θ)     # simple conversion for the more common/readable method
 
-        w = ExponentialWeights(4, λ)
+        v = [λ*(1-λ)^(1-i) for i = 1:4]
+        w = ExponentialWeights(v ./ sum(v))
 
         @test round.(w, digits=4) == [0.1837, 0.2222, 0.2688, 0.3253]
         @test eweights(4, λ) ≈ w
@@ -513,6 +514,8 @@ end
     @testset "Failure Conditions" begin
         @test_throws ArgumentError eweights(0, 0.3)
         @test_throws ArgumentError eweights(1, 1.1)
+        @test_throws ArgumentError eweights(rand(4))
+        @test_throws ArgumentError eweights(rand(4, 4))
         @test_throws ArgumentError ExponentialWeights(rand(4))
     end
 
